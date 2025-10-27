@@ -1,0 +1,113 @@
+               column     type      total        nulls  null_pct  min_val  \
+0              tconst  varchar  465811724          0.0      0.00      NaN   
+1           titleType  varchar  465811724          0.0      0.00      NaN   
+2        primaryTitle  varchar  465811724          0.0      0.00      NaN   
+3       originalTitle  varchar  465811724          0.0      0.00      NaN   
+4             isAdult   bigint  465811724          0.0      0.00      0.0   
+5           startYear   bigint  465811724   65894855.0     14.15   1874.0   
+6             endYear  varchar  465811724  458488696.0     98.43      NaN   
+7      runtimeMinutes   bigint  465811724  269538145.0     57.86      0.0   
+8              genres  varchar  465811724   16246770.0      3.49      NaN   
+9       averageRating   double  465811724  367425094.0     78.88      1.0   
+10           numVotes   bigint  465811724  367425094.0     78.88      5.0   
+11          directors  varchar  465811724  102012828.0     21.90      NaN   
+12            writers  varchar  465811724  112687062.0     24.19      NaN   
+13       parentTconst  varchar  465811724  101166474.0     21.72      NaN   
+14       seasonNumber   bigint  465811724  136575677.0     29.32      1.0   
+15      episodeNumber   bigint  465811724  136575677.0     29.32      0.0   
+16            titleId  varchar  465811724      59793.0      0.01      NaN   
+17           ordering   bigint  465811724      59793.0      0.01      1.0   
+18              title  varchar  465811724      59793.0      0.01      NaN   
+19             region  varchar  465811724   97667814.0     20.97      NaN   
+20           language  varchar  465811724  166901244.0     35.83      NaN   
+21              types  varchar  465811724  308428025.0     66.21      NaN   
+22         attributes  varchar  465811724  461729427.0     99.12      NaN   
+23    isOriginalTitle   bigint  465811724      59793.0      0.01      0.0   
+24           tconst_1  varchar  465811724    4076907.0      0.88      NaN   
+25         ordering_1   bigint  465811724    4076907.0      0.88      1.0   
+26             nconst  varchar  465811724    4076907.0      0.88      NaN   
+27           category  varchar  465811724    4076907.0      0.88      NaN   
+28                job  varchar  465811724  379682851.0     81.51      NaN   
+29         characters  varchar  465811724  242832221.0     52.13      NaN   
+30           nconst_1  varchar  465811724    4130750.0      0.89      NaN   
+31        primaryName  varchar  465811724    4130750.0      0.89      NaN   
+32          birthYear   bigint  465811724  266957431.0     57.31      4.0   
+33          deathYear   bigint  465811724  407662889.0     87.52     17.0   
+34  primaryProfession  varchar  465811724   19586026.0      4.20      NaN   
+35     knownForTitles  varchar  465811724    4462847.0      0.96      NaN   
+
+      max_val      mean_val  median_val  distinct_vals  \
+0         NaN           NaN         NaN       11993523   
+1         NaN           NaN         NaN             11   
+2         NaN           NaN         NaN        5393741   
+3         NaN           NaN         NaN        5420470   
+4         1.0      0.007206         0.0              2   
+5      2115.0   2005.709074      2012.0            153   
+6         NaN           NaN         NaN             98   
+7   3692080.0     57.698560        45.0            974   
+8         NaN           NaN         NaN           2364   
+9        10.0      6.607314         6.7             91   
+10  3111175.0  16255.571975       182.0          23831   
+11        NaN           NaN         NaN         980178   
+12        NaN           NaN         NaN        1457099   
+13        NaN           NaN         NaN         227318   
+14     2024.0      2.670104         1.0            326   
+15    91334.0    594.466106        81.0          15845   
+16        NaN           NaN         NaN       11984050   
+17      251.0      4.849548         4.0            251   
+18        NaN           NaN         NaN        7650111   
+19        NaN           NaN         NaN            249   
+20        NaN           NaN         NaN            110   
+21        NaN           NaN         NaN             23   
+22        NaN           NaN         NaN            184   
+23        1.0      0.207151         0.0              2   
+24        NaN           NaN         NaN       10823900   
+25       75.0      7.244164         6.0             75   
+26        NaN           NaN         NaN        6852309   
+27        NaN           NaN         NaN             13   
+28        NaN           NaN         NaN          45518   
+29        NaN           NaN         NaN        4372575   
+30        NaN           NaN         NaN        6845023   
+31        NaN           NaN         NaN        5664836   
+32     2025.0   1956.282206      1961.0            485   
+33     2025.0   2001.534219      2007.0            429   
+34        NaN           NaN         NaN          19833   
+35        NaN           NaN         NaN        4346918   
+
+                                             examples  
+0                     tt0102859, tt0102860, tt0102861  
+1                                 video, movie, movie  
+2                 Science Crazed, Scissors, Scorchers  
+3                 Science Crazed, Scissors, Scorchers  
+4                                             0, 0, 0  
+5                                    1991, 1991, 1991  
+6                                    1991, 1991, 1991  
+7                                         83, 105, 81  
+8        Comedy,Horror, Horror,Thriller, Comedy,Drama  
+9                                       2.6, 5.1, 5.5  
+10                                     181, 3467, 723  
+11                    nm0842833, nm0208342, nm0063581  
+12          nm0842833, nm0783679,nm0208342, nm0063581  
+13                    tt1338457, tt1338457, tt1369618  
+14                                            1, 1, 1  
+15                                   2843, 2842, 2844  
+16                    tt0102859, tt0102860, tt0102861  
+17                                            4, 9, 9  
+18  Science Crazed, Fenêtre sur crime, American Co...  
+19                                         CA, FR, DE  
+20                                         ru, ja, en  
+21              imdbDisplay, imdbDisplay, imdbDisplay  
+22  complete title, new title, alternative transli...  
+23                                            0, 0, 0  
+24                    tt0102859, tt0102860, tt0102861  
+25                                         17, 22, 19  
+26                    nm0842833, nm0824175, nm0251679  
+27   editor, production_designer, production_designer  
+28              production_designer, editor, producer  
+29         ["Aldrovandi"], ["W.B. Springer"], ["Cop"]  
+30                    nm0842833, nm0824175, nm0251679  
+31        Ron Switzer, Craig Stearns, Bill Eigenbrodt  
+32                                   1942, 1944, 1939  
+33                                   2025, 2005, 2014  
+34  director,writer,editor, production_designer,ar...  
+35  tt0102859, tt0110475,tt0208003,tt2543312,tt183...  
