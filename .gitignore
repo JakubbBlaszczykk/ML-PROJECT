@@ -1,0 +1,5 @@
+*.parquet
+*.csv
+.DS_STORE
+.env
+config/.env
