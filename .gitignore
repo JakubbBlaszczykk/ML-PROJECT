@@ -4,3 +4,4 @@
 .env
 config/.env
 *.joblib
+.venv
