@@ -187,3 +187,4 @@ class ColumnSelector(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         return X[[self.key]]
+
