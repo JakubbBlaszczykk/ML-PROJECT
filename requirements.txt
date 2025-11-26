@@ -1,0 +1,11 @@
+pandas
+numpy
+polars
+scikit-learn
+sentence-transformers
+rank_bm25
+joblib
+matplotlib
+seaborn
+nltk
+python-dotenv

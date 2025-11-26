@@ -6,3 +6,5 @@ config/.env
 *.joblib
 .venv
 .pyc
+*.npy
+__pycache__/
