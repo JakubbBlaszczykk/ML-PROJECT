@@ -7,17 +7,23 @@ Loads settings from search_config.ini
 import configparser
 import os
 
+# Define project root
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+
 
 class SearchConfig:
     """Centralized configuration for the search engine."""
     
-    def __init__(self, config_path="src/config/search_config.ini"):
+    def __init__(self, config_path=None):
         """
         Load configuration from INI file.
         
         Args:
             config_path: Path to configuration file
         """
+        if config_path is None:
+            config_path = os.path.join(PROJECT_ROOT, "src/config/search_config.ini")
+            
         self.config = configparser.ConfigParser()
         
         # Load config file
@@ -123,7 +129,7 @@ class SearchConfig:
 # Global config instance
 _config = None
 
-def get_config(config_path="src/config/search_config.ini"):
+def get_config(config_path=None):
     """
     Get the global configuration instance.
     
@@ -139,7 +145,7 @@ def get_config(config_path="src/config/search_config.ini"):
     return _config
 
 
-def reload_config(config_path="src/config/search_config.ini"):
+def reload_config(config_path=None):
     """
     Reload configuration from file.
     

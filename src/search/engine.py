@@ -12,6 +12,15 @@ from typing import Dict, List, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
+import sys
+import os
+
+# Add parent directory to path for imports when run directly
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../"))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 from src.search.hybrid_search import HybridSearcher
 from src.search.query_parser import QueryParser
 from src.config.config import get_config
@@ -31,10 +40,26 @@ class MovieSearchEngine:
     """
     
     def __init__(self, 
-                 bm25_path="data/bm25_model.joblib",
-                 sbert_embeddings_path="data/sbert_embeddings.npy",
-                 data_path="data/imdb_us_movies_unified.parquet",
+                 bm25_path=None,
+                 sbert_embeddings_path=None,
+                 data_path=None,
                  sbert_model_name='all-MiniLM-L6-v2'):
+        """
+        Initialize the search engine.
+        
+        Args:
+            bm25_path: Path to BM25 model
+            sbert_embeddings_path: Path to SBERT embeddings
+            data_path: Path to unified data file
+            sbert_model_name: SBERT model name
+        """
+        # Use absolute paths based on project_root defined at module level
+        if bm25_path is None:
+            bm25_path = os.path.join(project_root, "data/bm25_model.joblib")
+        if sbert_embeddings_path is None:
+            sbert_embeddings_path = os.path.join(project_root, "data/sbert_embeddings.npy")
+        if data_path is None:
+            data_path = os.path.join(project_root, "data/imdb_us_movies_unified.parquet")
         """
         Initialize the search engine.
         
@@ -60,7 +85,8 @@ class MovieSearchEngine:
         # Initialize query parser (still needs merged data for lookup sets)
         # TODO: Could optimize by extracting unique names from unified file instead
         print("\n[2/2] Loading Query Parser...")
-        self.query_parser = QueryParser(data_path="data/imdb_us_movies_merged.parquet")
+        query_parser_data_path = os.path.join(project_root, "data/imdb_us_movies_merged.parquet")
+        self.query_parser = QueryParser(data_path=query_parser_data_path)
         
         # Load configuration
         self.config = get_config()

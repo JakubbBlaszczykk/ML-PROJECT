@@ -11,6 +11,15 @@ import pickle
 import os
 from typing import Dict, List, Optional, Set
 from collections import defaultdict
+import sys
+import os
+
+# Add parent directory to path for imports when run directly
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../"))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 from src.config.config import get_config
 from pathlib import Path
 
@@ -109,7 +118,55 @@ GENRE_ALIASES = {
     # Musical variations
     'music': 'musical',
 }
+# Trie implementation for fast keyword matching
+class TrieNode:
+    def __init__(self):
+        self.children = {}
+        self.is_end_of_word = False
+        self.word = None
 
+class Trie:
+    def __init__(self):
+        self.root = TrieNode()
+    
+    def insert(self, word):
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.is_end_of_word = True
+        node.word = word
+
+    def search_in_text(self, text):
+        """
+        Find all occurrences of words in the trie within the text.
+        Returns a set of found words.
+        """
+        found_words = set()
+        n = len(text)
+        
+        # Iterate through each character in text as a potential start of a word
+        # This is a simplified approach; Aho-Corasick would be faster but more complex to implement from scratch
+        # Given the constraints, this is still much faster than regex for 100k patterns
+        for i in range(n):
+            node = self.root
+            for j in range(i, n):
+                char = text[j]
+                if char not in node.children:
+                    break
+                node = node.children[char]
+                if node.is_end_of_word:
+                    # Verify word boundary to avoid partial matches inside other words
+                    # Check previous char
+                    if i > 0 and text[i-1].isalnum():
+                        continue
+                    # Check next char
+                    if j < n - 1 and text[j+1].isalnum():
+                        continue
+                    found_words.add(node.word)
+        
+        return found_words
 
 class QueryParser:
     """
@@ -121,7 +178,7 @@ class QueryParser:
     should match both genre:action and title containing "action".
     """
     
-    def __init__(self, data_path: str = "data/imdb_us_movies_merged.parquet", force_rebuild: bool = False):
+    def __init__(self, data_path: str = None, force_rebuild: bool = False):
         """
         Initialize the query parser by creating or loading lookup sets.
         
@@ -129,6 +186,9 @@ class QueryParser:
             data_path: Path to the parquet file containing movie data
             force_rebuild: If True, rebuild lookup sets even if cache exists
         """
+        # Use absolute paths based on project_root defined at module level
+        if data_path is None:
+            data_path = os.path.join(project_root, "data/imdb_us_movies_merged.parquet")
         print("Initializing QueryParser...")
         
         # Load configuration
@@ -164,10 +224,30 @@ class QueryParser:
                 self.writers_set = cached_data['writers']
                 self.primary_roles = cached_data['primary_roles']
                 self.genres_set = cached_data['genres']
+                
                 print(f"✓ Loaded {len(self.actors_set)} unique actors from cache")
                 print(f"✓ Loaded {len(self.directors_set)} unique directors from cache")
                 print(f"✓ Loaded {len(self.writers_set)} unique writers from cache")
+                print(f"✓ Loaded {len(self.directors_set)} unique directors from cache")
+                print(f"✓ Loaded {len(self.writers_set)} unique writers from cache")
                 print(f"✓ Loaded {len(self.genres_set)} unique genres from cache")
+                
+                # Rebuild Trie (it's fast enough to not need pickling, or we could pickle it too)
+                # Pickling recursive objects can be tricky/large, rebuilding is safer
+                print("Building Trie for fast keyword matching...")
+                self.trie = Trie()
+                all_names = self.actors_set.union(self.directors_set).union(self.writers_set)
+                
+                min_words = self.config.query_parser['min_name_words']
+                min_length = self.config.query_parser['min_single_word_length']
+                
+                count = 0
+                for n in all_names:
+                    word_count = len(n.split())
+                    if word_count >= min_words or len(n) >= min_length:
+                        self.trie.insert(n)
+                        count += 1
+                print(f"✓ Added {count} names to Trie")
             except Exception as e:
                 print(f"Failed to load cache: {e}")
                 print("Rebuilding lookup sets...")
@@ -192,6 +272,23 @@ class QueryParser:
             print(f"✓ Created {len(self.writers_set)} unique writers")
             print(f"✓ Created {len(self.genres_set)} unique genres")
             
+            # Build Trie for fast searching
+            print("Building Trie for fast keyword matching...")
+            self.trie = Trie()
+            all_names = self.actors_set.union(self.directors_set).union(self.writers_set)
+            
+            # Filter names to avoid false positives using config settings
+            min_words = self.config.query_parser['min_name_words']
+            min_length = self.config.query_parser['min_single_word_length']
+            
+            count = 0
+            for n in all_names:
+                word_count = len(n.split())
+                if word_count >= min_words or len(n) >= min_length:
+                    self.trie.insert(n)
+                    count += 1
+            print(f"✓ Added {count} names to Trie")
+            
             # Save to cache
             try:
                 cache_data = {
@@ -211,70 +308,68 @@ class QueryParser:
     
     def _extract_people_with_roles(self, df: pl.DataFrame) -> Dict:
         """
-        Extract people names and count their appearances in each role.
-        
-        Args:
-            df: DataFrame containing movie data
-            
-        Returns:
-            Dictionary with:
-                - 'actors': Set of actor names
-                - 'directors': Set of director names
-                - 'writers': Set of writer names
-                - 'primary_roles': Dict mapping name -> primary role
+        Extract people names and count their appearances in each role using optimized Polars operations.
         """
-        from collections import defaultdict
+        # Helper to extract and count names for a role
+        def get_role_counts(col_name, role_name):
+            return (
+                df.select(pl.col(col_name))
+                .explode(col_name)
+                .drop_nulls()
+                .select(pl.col(col_name).struct.field("primaryName").alias("name"))
+                .drop_nulls()
+                .with_columns(pl.col("name").str.to_lowercase())
+                .group_by("name")
+                .count()
+                .rename({"count": f"{role_name}_count"})
+            )
+
+        # Get counts for each role
+        actor_counts = get_role_counts("cast", "actor")
+        director_counts = get_role_counts("directors", "director")
+        writer_counts = get_role_counts("writers", "writer")
+
+        # Join all counts
+        # We start with all unique names
+        all_names = (
+            actor_counts.select("name")
+            .vstack(director_counts.select("name"))
+            .vstack(writer_counts.select("name"))
+            .unique()
+        )
+
+        # Join counts back
+        combined = (
+            all_names
+            .join(actor_counts, on="name", how="left")
+            .join(director_counts, on="name", how="left")
+            .join(writer_counts, on="name", how="left")
+            .fill_null(0)
+        )
+
+        # Convert to dictionary for fast lookup
+        # This is much faster than iterating rows
+        result_dicts = combined.to_dicts()
         
-        role_counts = defaultdict(lambda: {'actor': 0, 'director': 0, 'writer': 0})
-        
-        # Count appearances in each role
-        for row in df.select(['cast', 'directors', 'writers']).to_dicts():
-            # Process cast
-            cast_list = row.get('cast')
-            if cast_list:
-                for person in cast_list:
-                    if person and isinstance(person, dict):
-                        name = person.get('primaryName')
-                        if name:
-                            role_counts[name.lower()]['actor'] += 1
-            
-            # Process directors
-            directors_list = row.get('directors')
-            if directors_list:
-                for person in directors_list:
-                    if person and isinstance(person, dict):
-                        name = person.get('primaryName')
-                        if name:
-                            role_counts[name.lower()]['director'] += 1
-            
-            # Process writers
-            writers_list = row.get('writers')
-            if writers_list:
-                for person in writers_list:
-                    if person and isinstance(person, dict):
-                        name = person.get('primaryName')
-                        if name:
-                            role_counts[name.lower()]['writer'] += 1
-        
-        # Determine primary roles and create sets
         actors_set = set()
         directors_set = set()
         writers_set = set()
         primary_roles = {}
         
-        for name, counts in role_counts.items():
-            # Add to all relevant sets
-            if counts['actor'] > 0:
-                actors_set.add(name)
-            if counts['director'] > 0:
-                directors_set.add(name)
-            if counts['writer'] > 0:
-                writers_set.add(name)
+        for row in result_dicts:
+            name = row['name']
+            a_count = row['actor_count']
+            d_count = row['director_count']
+            w_count = row['writer_count']
             
-            # Determine primary role (most appearances)
-            primary_role = max(counts.items(), key=lambda x: x[1])[0]
-            primary_roles[name] = primary_role
-        
+            if a_count > 0: actors_set.add(name)
+            if d_count > 0: directors_set.add(name)
+            if w_count > 0: writers_set.add(name)
+            
+            # Determine primary role
+            counts = {'actor': a_count, 'director': d_count, 'writer': w_count}
+            primary_roles[name] = max(counts.items(), key=lambda x: x[1])[0]
+            
         return {
             'actors': actors_set,
             'directors': directors_set,
@@ -479,44 +574,23 @@ class QueryParser:
     
     def _find_all_people_in_query(self, query_lower: str, found_tokens: Set[str]) -> List[str]:
         """
-        Find all people names (actors, directors, writers) in the query string.
-        
-        Args:
-            query_lower: Lowercase query string
-            found_tokens: Set to track found tokens
-            
-        Returns:
-            List of matched people names
+        Find all people names (actors, directors, writers) in the query string using Trie.
         """
         matched_people = []
         
-        # Combine all people into one set
-        all_people = self.actors_set.union(self.directors_set).union(self.writers_set)
-        
-        # Filter names to avoid false positives using config settings
-        min_words = self.config.query_parser['min_name_words']
-        min_length = self.config.query_parser['min_single_word_length']
-        
-        valid_names = []
-        for n in all_people:
-            word_count = len(n.split())
-            if word_count >= min_words:  # Multi-word names always valid
-                valid_names.append(n)
-            elif len(n) >= min_length:  # Single word but long enough
-                valid_names.append(n)
+        # Use Trie to find all matches in one pass
+        found_names = self.trie.search_in_text(query_lower)
         
         # Sort by length (longest first) to match multi-word names before single words
-        sorted_names = sorted(valid_names, key=len, reverse=True)
+        # This is less critical now with Trie but good for consistency
+        sorted_names = sorted(list(found_names), key=len, reverse=True)
         
         for name in sorted_names:
-            # Use word boundaries to avoid partial matches
-            pattern = r'\b' + re.escape(name) + r'\b'
-            if re.search(pattern, query_lower):
-                # Avoid overlapping matches
-                name_words = set(name.split())
-                if not name_words.intersection(found_tokens):
-                    matched_people.append(name)
-                    found_tokens.update(name_words)
+            # Check if not already found (e.g. part of another name)
+            name_words = set(name.split())
+            if not name_words.intersection(found_tokens):
+                matched_people.append(name)
+                found_tokens.update(name_words)
         
         return matched_people
     
@@ -629,7 +703,7 @@ class QueryParser:
 # Module-level function for convenience
 _parser_instance = None
 
-def get_parser(data_path: str = "data/imdb_us_movies_merged.parquet") -> QueryParser:
+def get_parser(data_path: str = None) -> QueryParser:
     """
     Get or create a singleton QueryParser instance.
     
@@ -645,7 +719,7 @@ def get_parser(data_path: str = "data/imdb_us_movies_merged.parquet") -> QueryPa
     return _parser_instance
 
 
-def parse_query(query: str, data_path: str = "data/imdb_us_movies_merged.parquet") -> Dict:
+def parse_query(query: str, data_path: str = None) -> Dict:
     """
     Convenience function to parse a query.
     
