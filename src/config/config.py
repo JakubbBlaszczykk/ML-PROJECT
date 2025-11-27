@@ -41,6 +41,7 @@ class SearchConfig:
         self._load_multi_role_settings()
         self._load_result_settings()
         self._load_metadata_settings()
+        self._load_fuzzy_matching_settings()
     
     def _load_weights(self):
         """Load ranking formula weights."""
@@ -123,6 +124,28 @@ class SearchConfig:
         self.metadata = {
             'preferred_title_field': metadata_section.get('preferred_title_field'),
             'fallback_title_field': metadata_section.get('fallback_title_field'),
+        }
+    
+    def _load_fuzzy_matching_settings(self):
+        """Load fuzzy matching settings."""
+        fuzzy_section = self.config['fuzzy_matching']
+        self.fuzzy_matching = {
+            'enabled': fuzzy_section.getboolean('enabled'),
+            'people_min_similarity': fuzzy_section.getfloat('people_min_similarity'),
+            'people_min_chars': fuzzy_section.getint('people_min_chars'),
+            'people_max_candidates': fuzzy_section.getint('people_max_candidates'),
+            'genre_min_similarity': fuzzy_section.getfloat('genre_min_similarity'),
+            'genre_min_chars': fuzzy_section.getint('genre_min_chars'),
+            'title_min_similarity': fuzzy_section.getfloat('title_min_similarity'),
+            'title_min_chars': fuzzy_section.getint('title_min_chars'),
+            'return_all_above_threshold': fuzzy_section.getboolean('return_all_above_threshold'),
+            'use_popularity_weighting': fuzzy_section.getboolean('use_popularity_weighting'),
+            'popularity_weight': fuzzy_section.getfloat('popularity_weight'),
+            # Title fuzzy matching
+            'title_fuzzy_enabled': fuzzy_section.getboolean('title_fuzzy_enabled'),
+            'title_fuzzy_min_similarity': fuzzy_section.getfloat('title_fuzzy_min_similarity'),
+            'title_fuzzy_min_chars': fuzzy_section.getint('title_fuzzy_min_chars'),
+            'title_popularity_limit': fuzzy_section.getint('title_popularity_limit'),
         }
 
 

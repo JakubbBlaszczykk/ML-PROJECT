@@ -51,8 +51,14 @@ class HybridSearcher:
         self.corpus_generator = SearchCorpusGenerator()
         
     def search(self, query, k=60, rrf_k=60, parsed_query=None):
+        # Use corrected query if available (with fuzzy-matched names)
+        # This ensures BM25/SBERT search for "tom hamks" uses "tom hanks"
+        search_query = query
+        if parsed_query and 'corrected_search_term' in parsed_query:
+            search_query = parsed_query['corrected_search_term']
+        
         # 1. BM25 Search
-        normalized_query = self.corpus_generator._normalize_text(query).split()
+        normalized_query = self.corpus_generator._normalize_text(search_query).split()
         bm25_scores = self.bm25.get_scores(normalized_query)
         
         # Get top k BM25 indices
@@ -61,7 +67,7 @@ class HybridSearcher:
         top_bm25_indices = np.argsort(bm25_scores)[::-1][:k]
         
         # 2. SBERT Search
-        query_embedding = self.sbert_model.encode(query)
+        query_embedding = self.sbert_model.encode(search_query)
         # Dot product
         sbert_scores = np.dot(self.sbert_embeddings, query_embedding)
         

@@ -225,12 +225,36 @@ class QueryParser:
                 self.primary_roles = cached_data['primary_roles']
                 self.genres_set = cached_data['genres']
                 
+                # Load and normalize popularity scores
+                popularity_scores = cached_data.get('popularity_scores', {})
+                if popularity_scores:
+                    max_popularity = max(popularity_scores.values())
+                    self.person_popularity = {
+                        name: count / max_popularity 
+                        for name, count in popularity_scores.items()
+                    }
+                else:
+                    self.person_popularity = {}
+                
+                # Always load popular titles even when using cache
+                # This is needed for title fuzzy matching
+                if self.config.fuzzy_matching.get('title_fuzzy_enabled', True):
+                    print("Loading data for title fuzzy matching...")
+                    # Need to load the dataframe to extract popular titles
+                    self.df = pl.read_parquet(data_path) 
+                    self._load_popular_titles()
+                else:
+                    self.popular_titles = set()
+                    self.normalized_titles = {}
+                
                 print(f"✓ Loaded {len(self.actors_set)} unique actors from cache")
                 print(f"✓ Loaded {len(self.directors_set)} unique directors from cache")
                 print(f"✓ Loaded {len(self.writers_set)} unique writers from cache")
                 print(f"✓ Loaded {len(self.directors_set)} unique directors from cache")
                 print(f"✓ Loaded {len(self.writers_set)} unique writers from cache")
                 print(f"✓ Loaded {len(self.genres_set)} unique genres from cache")
+                if self.config.fuzzy_matching.get('title_fuzzy_enabled', True):
+                    print(f"✓ Loaded {len(self.popular_titles)} popular titles for fuzzy matching")
                 
                 # Rebuild Trie (it's fast enough to not need pickling, or we could pickle it too)
                 # Pickling recursive objects can be tricky/large, rebuilding is safer
@@ -267,10 +291,27 @@ class QueryParser:
             self.primary_roles = people_roles['primary_roles']
             self.genres_set = self._extract_genres(self.df)
             
+            # Store and normalize popularity scores for fuzzy matching
+            popularity_scores = people_roles['popularity_scores']
+            max_popularity = max(popularity_scores.values()) if popularity_scores else 1
+            self.person_popularity = {
+                name: count / max_popularity 
+                for name, count in popularity_scores.items()
+            }
+            
+            # Load popular titles for fuzzy matching
+            if self.config.fuzzy_matching.get('title_fuzzy_enabled', True):
+                self._load_popular_titles()
+            else:
+                self.popular_titles = set()
+                self.normalized_titles = {}
+            
             print(f"✓ Created {len(self.actors_set)} unique actors")
             print(f"✓ Created {len(self.directors_set)} unique directors")
             print(f"✓ Created {len(self.writers_set)} unique writers")
             print(f"✓ Created {len(self.genres_set)} unique genres")
+            if self.config.fuzzy_matching.get('title_fuzzy_enabled', True):
+                print(f"✓ Loaded {len(self.popular_titles)} popular titles for fuzzy matching")
             
             # Build Trie for fast searching
             print("Building Trie for fast keyword matching...")
@@ -291,12 +332,15 @@ class QueryParser:
             
             # Save to cache
             try:
+                # Get raw popularity scores before normalization for caching
+                popularity_scores = people_roles['popularity_scores']
                 cache_data = {
                     'actors': self.actors_set,
                     'directors': self.directors_set,
                     'writers': self.writers_set,
                     'primary_roles': self.primary_roles,
-                    'genres': self.genres_set
+                    'genres': self.genres_set,
+                    'popularity_scores': popularity_scores
                 }
                 with open(cache_path, 'wb') as f:
                     pickle.dump(cache_data, f)
@@ -355,6 +399,7 @@ class QueryParser:
         directors_set = set()
         writers_set = set()
         primary_roles = {}
+        popularity_scores = {}
         
         for row in result_dicts:
             name = row['name']
@@ -370,37 +415,61 @@ class QueryParser:
             counts = {'actor': a_count, 'director': d_count, 'writer': w_count}
             primary_roles[name] = max(counts.items(), key=lambda x: x[1])[0]
             
+            # Store total count for popularity scoring
+            popularity_scores[name] = a_count + d_count + w_count
+            
         return {
             'actors': actors_set,
             'directors': directors_set,
             'writers': writers_set,
-            'primary_roles': primary_roles
+            'primary_roles': primary_roles,
+            'popularity_scores': popularity_scores
         }
     
     def _extract_genres(self, df: pl.DataFrame) -> Set[str]:
-        """
-        Extract unique genres from the genres column.
-        
-        Args:
-            df: DataFrame containing movie data
-            
-        Returns:
-            Set of unique genres (lowercase for matching)
-        """
+        """Extract unique genres from the dataframe."""
         genres = set()
         
-        # Get unique genres using polars - much more efficient
-        genres_list = df.select('genres').unique().to_series().to_list()
+        # Get unique genre strings (comma-separated)
+        genre_strings = df.select('genres').unique().to_series().to_list()
         
-        for row in genres_list:
-            if row is not None and isinstance(row, str):
-                # Genres are comma-separated
-                for genre in row.split(','):
+        for genre_str in genre_strings:
+            if genre_str and isinstance(genre_str, str):
+                # Split comma-separated genres
+                for genre in genre_str.split(','):
                     genre = genre.strip()
                     if genre:
                         genres.add(genre.lower())
         
         return genres
+    
+    def _load_popular_titles(self):
+        """
+        Load top N popular movie titles for fuzzy matching.
+        Popularity is based on numVotes.
+        """
+        limit = self.config.fuzzy_matching.get('title_popularity_limit', 10000)
+        
+        # Get top N movies by numVotes
+        top_movies = (
+            self.df
+            .select(['primaryTitle', 'numVotes'])
+            .sort('numVotes', descending=True)
+            .limit(limit)
+        )
+        
+        # Extract titles and create normalized versions
+        self.popular_titles = set(top_movies['primaryTitle'].to_list())
+        
+        # Store normalized versions for fuzzy matching
+        # This allows "avtar" to match "Avatar" by comparing normalized forms
+        from src.data.custom_transformers import SearchCorpusGenerator
+        corpus_gen = SearchCorpusGenerator()
+        
+        self.normalized_titles = {}
+        for title in self.popular_titles:
+            normalized = corpus_gen._normalize_text(title)
+            self.normalized_titles[normalized] = title
     
     def parse_query(self, query: str) -> Dict:
         """
@@ -464,6 +533,32 @@ class QueryParser:
         # 4. Check for multi-word people names
         # Find all people mentioned
         all_people = self._find_all_people_in_query(query_lower, found_tokens)
+        
+        # Build corrected_search_term for BM25/SBERT by replacing fuzzy-matched typos
+        # This ensures "tom hamks" becomes "tom hanks" for semantic search
+        corrected_query = query_lower
+        replacements = []  # Track (original_span, corrected_name) for replacement
+        
+        # Collect all fuzzy matches that need replacement
+        # We need to replace the original query tokens with the corrected names
+        for person in all_people:
+            # person is the corrected name (e.g., "tom cruise")
+            # We need to find what query tokens matched to it
+            # For now, if the person name is not in the original query, it was fuzzy matched
+            if person not in query_lower:
+                # This was a fuzzy match - we should replace the typo
+                # Find the most likely tokens that got fuzzy matched
+                # This is tricky - for simplicity, just add the corrected name
+                corrected_query += f" {person}"
+        
+        # Add fuzzy-matched titles to corrected query
+        # This allows "avtar" to match "Avatar" via BM25/SBERT
+        query_tokens = query_lower.split()
+        matched_titles = self._fuzzy_find_titles(query_tokens, found_tokens)
+        for title in matched_titles:
+            corrected_query += f" {title}"
+       
+        result['corrected_search_term'] = corrected_query
         
         # Classify based on contextual keywords OR primary role
         for person_name in all_people:
@@ -572,17 +667,187 @@ class QueryParser:
             roles.append('writer')
         return roles
     
+    def _fuzzy_find_people(self, query_token: str, exclude_found: Set[str]) -> List[str]:
+        """
+        Find people names using fuzzy matching with RapidFuzz.
+        
+        Args:
+            query_token: The token to match
+            exclude_found: Set of already found names to exclude
+            
+        Returns:
+            List of matched names (can be multiple if above threshold)
+        """
+        try:
+            from rapidfuzz import process, fuzz
+        except ImportError:
+            # RapidFuzz not available, skip fuzzy matching
+            return []
+        
+        # Check if fuzzy matching is enabled
+        if not self.config.fuzzy_matching['enabled']:
+            return []
+        
+        # Check minimum length
+        if len(query_token) < self.config.fuzzy_matching['people_min_chars']:
+            return []
+        
+        all_people = self.actors_set | self.directors_set | self.writers_set
+        
+        # Exclude already found names
+        searchable = all_people - exclude_found
+        
+        if not searchable:
+            return []
+        
+        # Use WRatio for better partial matching
+        threshold = self.config.fuzzy_matching['people_min_similarity'] * 100
+        
+        # Get more candidates than needed for filtering
+        max_candidates = self.config.fuzzy_matching['people_max_candidates']
+        results = process.extract(
+            query_token,
+            searchable,
+            scorer=fuzz.WRatio,
+            limit=max_candidates * 3  # Get more, filter later
+        )
+        
+        # Filter by threshold
+        candidates = [(name, score/100) for name, score, _ in results if score >= threshold]
+        
+        if not candidates:
+            return []
+        
+        # Apply popularity weighting if enabled
+        if self.config.fuzzy_matching['use_popularity_weighting']:
+            candidates = self._apply_popularity_weighting(candidates)
+        
+        # Return based on config
+        if self.config.fuzzy_matching['return_all_above_threshold']:
+            return [name for name, score in candidates]
+        else:
+            # Return top N
+            return [name for name, score in candidates[:max_candidates]]
+    
+    def _apply_popularity_weighting(self, candidates: List[tuple]) -> List[tuple]:
+        """
+        Weight fuzzy match candidates by popularity (based on role counts).
+        
+        Args:
+            candidates: List of (name, fuzzy_score) tuples
+            
+        Returns:
+            List of (name, combined_score) tuples, sorted by combined score
+        """
+        weighted = []
+        popularity_weight = self.config.fuzzy_matching['popularity_weight']
+        
+        for name, fuzzy_score in candidates:
+            popularity = self.person_popularity.get(name, 0.0)
+            # Weighted average
+            combined_score = (1 - popularity_weight) * fuzzy_score + popularity_weight * popularity
+            weighted.append((name, combined_score))
+        
+        return sorted(weighted, key=lambda x: x[1], reverse=True)
+    
+    def _fuzzy_find_genre(self, query_token: str) -> Optional[str]:
+        """
+        Fuzzy match genre with strict threshold.
+        
+        Args:
+            query_token: The token to match
+            
+        Returns:
+            Best matching genre name or None
+        """
+        try:
+            from rapidfuzz import process, fuzz
+        except ImportError:
+            return None
+        
+        # Check if fuzzy matching is enabled
+        if not self.config.fuzzy_matching['enabled']:
+            return None
+        
+        if len(query_token) < self.config.fuzzy_matching['genre_min_chars']:
+            return None
+        
+        threshold = self.config.fuzzy_matching['genre_min_similarity'] * 100
+        
+        result = process.extractOne(
+            query_token,
+            self.genres_set,
+            scorer=fuzz.ratio,  # Use exact ratio for short genre names
+            score_cutoff=threshold
+        )
+        
+        if result:
+            return result[0]  # Return genre name
+        return None
+    
+    def _fuzzy_find_titles(self, query_tokens: List[str], found_tokens: Set[str]) -> List[str]:
+        """
+        Fuzzy match query tokens against popular movie titles.
+        
+        Args:
+            query_tokens: List of query tokens
+            found_tokens: Set of tokens already matched to people/genres
+            
+        Returns:
+            List of matched title strings
+        """
+        try:
+            from rapidfuzz import process, fuzz
+        except ImportError:
+            return []
+        
+        # Check if title fuzzy matching is enabled
+        if not self.config.fuzzy_matching.get('title_fuzzy_enabled', True):
+            return []
+        
+        matched_titles = []
+        min_chars = self.config.fuzzy_matching.get('title_fuzzy_min_chars', 3)
+        threshold = self.config.fuzzy_matching.get('title_fuzzy_min_similarity', 0.85) * 100
+        
+        # Try to match unmatched tokens against titles
+        for token in query_tokens:
+            # Skip if already used for people/genres
+            if token in found_tokens:
+                continue
+            
+            # Skip very short tokens
+            if len(token) < min_chars:
+                continue
+            
+            # Fuzzy match against normalized titles
+            result = process.extractOne(
+                token,
+                self.normalized_titles.keys(),
+                scorer=fuzz.ratio,
+                score_cutoff=threshold
+            )
+            
+            if result:
+                normalized_title, score, _ = result
+                original_title = self.normalized_titles[normalized_title]
+                matched_titles.append(original_title.lower())
+                # Mark token as used
+                found_tokens.add(token)
+        
+        return matched_titles
+    
     def _find_all_people_in_query(self, query_lower: str, found_tokens: Set[str]) -> List[str]:
         """
-        Find all people names (actors, directors, writers) in the query string using Trie.
+        Find all people names (actors, directors, writers) in the query string.
+        Uses Trie for exact matching, then fuzzy matching ONLY for multi-word names (2+ words).
+        Single-word fuzzy matching is disabled to prevent false positives.
         """
         matched_people = []
         
-        # Use Trie to find all matches in one pass
+        # Step 1: Use Trie to find exact matches
         found_names = self.trie.search_in_text(query_lower)
         
         # Sort by length (longest first) to match multi-word names before single words
-        # This is less critical now with Trie but good for consistency
         sorted_names = sorted(list(found_names), key=len, reverse=True)
         
         for name in sorted_names:
@@ -592,11 +857,73 @@ class QueryParser:
                 matched_people.append(name)
                 found_tokens.update(name_words)
         
+        # Step 2: Try fuzzy matching ONLY on consecutive token pairs (multi-word names)
+        # This prevents false positives from single-word matches like "o", "cru", "ham"
+        query_tokens = query_lower.split()
+        
+        # Try matching consecutive token pairs (for "tom crus" → "tom cruise")
+        for i in range(len(query_tokens) - 1):
+            token1 = query_tokens[i]
+            token2 = query_tokens[i + 1]
+            
+            # Skip if either token is already used
+            if token1 in found_tokens or token2 in found_tokens:
+                continue
+            
+            # Try matching the two-word combination
+            two_word_query = f"{token1} {token2}"
+            
+            # Skip if too short
+            if len(two_word_query) < self.config.fuzzy_matching['people_min_chars']:
+                continue
+            
+            # Try fuzzy matching on the two-word combination
+            fuzzy_matches = self._fuzzy_find_people(two_word_query, found_tokens)
+            
+            if fuzzy_matches:
+                # Check all fuzzy matches and accept the first that passes validation
+                # This is needed because top fuzzy match might not have correct token alignment
+                for name in fuzzy_matches:
+                    # Only accept multi-word results (filter out single-word names)
+                    if len(name.split()) >= 2:
+                        # Additional validation: ensure query tokens reasonably match name tokens
+                        # This prevents "top gun" → "hot glue gun" but allows "tom crus" → "tom cruise"
+                        name_tokens = name.split()
+                        
+                        # Simple heuristic: first chars of query tokens should match first chars of name tokens
+                        # Use flexible matching to handle typos
+                        try:
+                            from rapidfuzz import fuzz
+                            # Check if first query token fuzzy matches first name token
+                            # and last query token fuzzy matches last name token
+                            first_match = fuzz.partial_ratio(token1, name_tokens[0]) >= 70
+                            last_match = fuzz.partial_ratio(token2, name_tokens[-1]) >= 70
+                            
+                            if first_match and last_match:
+                                # Found a valid match!
+                                matched_people.append(name)
+                                found_tokens.update(name.split())
+                                # Mark the query tokens as used
+                                found_tokens.add(token1)
+                                found_tokens.add(token2)
+                                break  # Only take first valid match
+                        except ImportError:
+                            # Fallback if rapidfuzz not available - just accept the match
+                            matched_people.append(name)
+                            found_tokens.update(name.split())
+                            found_tokens.add(token1)
+                            found_tokens.add(token2)
+                            break
+        
+        # NOTE: Single-token fuzzy matching is DISABLED to prevent false positives
+        # like "o", "cru", "ham" being matched to random people
+        
         return matched_people
     
     def _find_genres_in_query(self, query_lower: str, found_tokens: Set[str]) -> List[str]:
         """
         Find genre keywords in the query string, including aliases.
+        Uses exact matching first, then fuzzy matching for unmatched tokens.
         
         Args:
             query_lower: Lowercase query string
@@ -606,8 +933,9 @@ class QueryParser:
             List of matched genres (canonical names)
         """
         matched_genres = set()  # Use set to avoid duplicates
+        matched_tokens = set()  # Track which tokens were matched
         
-        # First, check genre aliases
+        # Step 1: Check genre aliases (exact matching)
         for alias, canonical_genre in GENRE_ALIASES.items():
             # Use word boundaries for multi-word aliases
             pattern = r'\b' + re.escape(alias) + r'\b'
@@ -618,8 +946,9 @@ class QueryParser:
                     if canonical_genre in self.genres_set:
                         matched_genres.add(canonical_genre)
                         found_tokens.add(alias)
+                        matched_tokens.add(alias)
         
-        # Then check actual genre names
+        # Step 2: Check actual genre names (exact matching)
         for genre in self.genres_set:
             # Use word boundaries
             pattern = r'\b' + re.escape(genre) + r'\b'
@@ -628,6 +957,55 @@ class QueryParser:
                 if genre not in found_tokens:
                     matched_genres.add(genre)
                     found_tokens.add(genre)
+                    matched_tokens.add(genre)
+        
+        # Step 3: Try fuzzy matching for unmatched tokens
+        query_tokens = query_lower.split()
+        
+        # Try consecutive token pairs first (for multi-word genre misspellings)
+        for i in range(len(query_tokens) - 1):
+            token1 = query_tokens[i]
+            token2 = query_tokens[i + 1]
+            
+            # Skip if already matched or used
+            if token1 in found_tokens or token2 in found_tokens:
+                continue
+            if token1 in matched_tokens or token2 in matched_tokens:
+                continue
+            
+            # Try two-word combination
+            two_word_query = f"{token1} {token2}"
+            
+            if len(two_word_query) >= self.config.fuzzy_matching['genre_min_chars']:
+                fuzzy_genre = self._fuzzy_find_genre(two_word_query)
+                
+                if fuzzy_genre:
+                    matched_genres.add(fuzzy_genre)
+                    found_tokens.add(token1)
+                    found_tokens.add(token2)
+                    matched_tokens.add(token1)
+                    matched_tokens.add(token2)
+        
+        # Then try single tokens
+        for token in query_tokens:
+            # Skip if token already matched or used for people
+            if token in found_tokens or token in matched_tokens:
+                continue
+            
+            # Skip very short tokens
+            if len(token) < self.config.fuzzy_matching['genre_min_chars']:
+                continue
+            
+            # Skip tokens that look like they might be part of a person's name
+            # (i.e., capitalized or similar to known person words)
+            # This is a heuristic to avoid matching "horrer" to people with "movie" in their name
+            
+            # Try fuzzy genre matching
+            fuzzy_genre = self._fuzzy_find_genre(token)
+            
+            if fuzzy_genre:
+                matched_genres.add(fuzzy_genre)
+                found_tokens.add(token)
         
         return list(matched_genres)
     
