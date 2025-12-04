@@ -1015,7 +1015,8 @@ class QueryParser:
         
         Patterns supported:
         - Single year: "2020", "1995"
-        - Decade: "1990s", "2000s"
+        - Decade (full): "1990s", "2000s"
+        - Decade (short): "90s", "80s", "70s" (assumes 19xx for 20-99, 20xx for 00-19)
         - Range: "2000-2010", "between 2000 and 2010"
         - Comparative: "before 2000", "after 1995", "since 2010"
         
@@ -1034,7 +1035,23 @@ class QueryParser:
             year_info['exact'] = year
             return year_info
         
-        # Decade (e.g., "1990s", "2000s")
+        # Short decade pattern (e.g., "90s", "80s", "00s")
+        # Assumes 19xx for decades 20-99 and 20xx for decades 00-19
+        short_decade = re.search(r'\b(\d{2})s\b', query)
+        if short_decade:
+            decade_suffix = int(short_decade.group(1))
+            # Determine century based on decade
+            if decade_suffix >= 20:
+                # "90s" -> 1990s, "80s" -> 1980s, etc.
+                decade_start = 1900 + decade_suffix
+            else:
+                # "00s" -> 2000s, "10s" -> 2010s
+                decade_start = 2000 + decade_suffix
+            year_info['min'] = decade_start
+            year_info['max'] = decade_start + 9
+            return year_info
+        
+        # Full decade (e.g., "1990s", "2000s")
         decade = re.search(r'\b(19\d0|20\d0)s\b', query)
         if decade:
             decade_start = int(decade.group(1))
