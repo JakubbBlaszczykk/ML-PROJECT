@@ -1,6 +1,3 @@
-#Source file with custom transformers used during preprocessing pipeline creation
-
-#Imports:
 import numpy as np
 import pandas as pd
 from sklearn.pipeline import Pipeline
@@ -9,6 +6,8 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, MultiLabelBinarizer, FunctionTransformer, KBinsDiscretizer
 from sklearn.feature_extraction.text import TfidfVectorizer
+import string
+from nltk.stem import PorterStemmer
 
 from sklearn import set_config
 set_config(transform_output="pandas")
@@ -55,19 +54,47 @@ class TypeCorrector(BaseEstimator, TransformerMixin):
 
 class SearchCorpusGenerator(BaseEstimator, TransformerMixin):
     def __init__(self):
-        pass
+        self.stemmer = PorterStemmer()
 
     def fit(self, X, y=None):
         return self
 
     def _flatten_names(self, list_of_structs):
-        if not isinstance(list_of_structs, list):
+        """Extract primaryName from list/array of person structs."""
+        import numpy as np
+        
+        if list_of_structs is None:
             return ""
+        if isinstance(list_of_structs, float) and np.isnan(list_of_structs):
+            return ""
+        
+        if not isinstance(list_of_structs, (list, np.ndarray)):
+            return ""
+        
         names = []
         for person in list_of_structs:
-            if person and person.get('primaryName'): 
-                names.append(person['primaryName'])
+            if person and isinstance(person, dict):
+                name = person.get('primaryName')
+                if name is not None:
+                    names.append(name)
+        
         return " ".join(names)
+
+    def _normalize_text(self, text):
+        """
+        Normalizes text: lowercase, remove punctuation, stem using PorterStemmer.
+        """
+        if not isinstance(text, str):
+            return ""
+        
+        text = text.lower()
+        
+        text = text.translate(str.maketrans('', '', string.punctuation))
+        
+        words = text.split()
+        stemmed_words = [self.stemmer.stem(word) for word in words]
+        
+        return " ".join(stemmed_words)
 
     def transform(self, X):
         X_copy = X.copy()
@@ -86,7 +113,9 @@ class SearchCorpusGenerator(BaseEstimator, TransformerMixin):
             X_copy['writers_text']
         )
         
-        return X_copy[['searchable_text']]
+        X_copy['normalized_title'] = X_copy['cat__title'].fillna('').apply(self._normalize_text)
+        
+        return X_copy[['searchable_text', 'normalized_title', 'cat__title']]
     
 
 
