@@ -233,4 +233,5 @@ else:
        
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-#to run: streamlit run src/app/app.py
+#to run: conda activate movie-mind
+#  streamlit run src/app/app.py
