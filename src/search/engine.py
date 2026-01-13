@@ -107,7 +107,7 @@ class MovieSearchEngine:
         return scored.sort_values("final_score", ascending=False).head(k).reset_index(drop=True)
 
     # =========================
-    # 🧠 SCORING LOGIC
+    # SCORING LOGIC
     # =========================
 
     def _compute_weighted_scores(self, candidates, parsed_query, weights):
@@ -170,10 +170,7 @@ class MovieSearchEngine:
                 + filter_boost
             )
 
-            # --- 💀 THE PUNISHER: Penalty for Low Votes ---
             # If a movie has fewer than 200 votes, subtract 5.0 points.
-            # This makes it mathematically impossible for "The Road to Ironman" (0 votes) 
-            # to beat "Iron Man" (1M votes).
             if num_votes < 200:
                 final_score -= 5.0 
 

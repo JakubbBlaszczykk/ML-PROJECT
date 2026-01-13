@@ -34,22 +34,18 @@ class HybridSearcher:
             data_path = os.path.join(project_root, "data/imdb_us_movies_unified.parquet")
         
         print("Loading BM25 model...")
-        # --- POCZĄTEK WKLEJANIA ---
         if os.path.exists(bm25_path):
             self.bm25 = joblib.load(bm25_path)
         else:
             print("⚠️ Index file not found. Initializing empty for build...")
             self.bm25 = None
-        # --- KONIEC WKLEJANIA ---
         
         print("Loading SBERT embeddings...")
-        # --- Zastąp tamtą linię tym blokiem: ---
         if os.path.exists(sbert_embeddings_path):
             self.sbert_embeddings = np.load(sbert_embeddings_path)
         else:
             print("⚠️ SBERT embeddings not found. Will need to build them...")
             self.sbert_embeddings = None
-        # ---------------------------------------
         
         print("Loading unified data...")
         # Note: BM25/SBERT were built on processed data (390,980 rows)

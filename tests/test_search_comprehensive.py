@@ -6,9 +6,8 @@ import warnings
 import configparser
 
 # ==============================================================================
-# 🧬 GOD MODE PATCH: INTERCEPT CONFIGURATION BEFORE ENGINE LOADS
+# PATCH: INTERCEPT CONFIGURATION BEFORE ENGINE LOADS
 # ==============================================================================
-print("🧬 ACTIVATING GOD MODE CONFIGURATION PATCH...")
 
 # Save original methods so we don't break everything
 _orig_get = configparser.ConfigParser.get
